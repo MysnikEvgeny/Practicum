@@ -1,194 +1,241 @@
-#include <algorithm>
+#include <cassert>
 #include <iostream>
-#include <set>
-#include <string>
-#include <utility>
-#include <vector>
 #include <map>
-#include <cmath>
+#include <sstream>
+#include <string>
+#include <vector>
 
 using namespace std;
 
-const int MAX_RESULT_DOCUMENT_COUNT = 5;
-
-string ReadLine() {
-    string s;
-    getline(cin, s);
-    return s;
-}
-
-int ReadLineWithNumber() {
-    int result = 0;
-    cin >> result;
-    ReadLine();
-    return result;
-}
-
-vector<string> SplitIntoWords(const string& text) {
-    vector<string> words;
-    string word;
-    for (const char c : text) {
-        if (c == ' ') {
-            if (!word.empty()) {
-                words.push_back(word);
-                word.clear();
-            }
-        } else {
-            word += c;
-        }
-    }
-    if (!word.empty()) {
-        words.push_back(word);
-    }
-
-    return words;
-}
-
-struct Document {
-    int id;
-    double relevance;
+enum class QueryType {
+    NewBus,
+    BusesForStop,
+    StopsForBus,
+    AllBuses,
 };
 
 struct Query {
-    set<string> words;
-    set<string> minus_words;
+    QueryType type;
+    string bus;
+    string stop;
+    vector<string> stops;
 };
 
-class SearchServer {
-public:
-    void SetStopWords(const string& text) {
-        if (!text.empty()) {
-            for (const string& word : SplitIntoWords(text)) {
-                stop_words_.insert(word);
-            }    
+istream& operator>>(istream& is, Query& q) {
+    // Реализуйте эту функцию
+
+    string operation_code;
+    cin >> operation_code;
+
+    if (operation_code == "NEW_BUS"s) {
+        q.type = QueryType::NewBus;
+        is >> q.bus;
+        
+        int stop_count;
+        is >> stop_count;
+
+        q.stops.resize(stop_count); //или clear?
+        for (string& stop : q.stops) {
+            is >> stop;
+            //q.stops.push_back(stop); 
         }
-    }
+    } else if (operation_code == "BUSES_FOR_STOP"s) {
+        q.type = QueryType::BusesForStop;
+        is >> q.stop; 
+    } else if (operation_code == "STOPS_FOR_BUS"s) {
+        q.type = QueryType::StopsForBus;
+        is >> q.bus;
+    } else if (operation_code == "ALL_BUSES"s) {
+        q.type = QueryType::AllBuses;        
+    }    
 
-    void AddDocument(int document_id, const string& document) {
-        const vector<string> words = SplitIntoWordsNoStop(document);
-        int N = words.size();
-
-        if (N > 0) {
-            for (const string& s : words) {
-                word_to_document_freqs_[s].insert(make_pair(document_id, 0.));
-                word_to_document_freqs_[s][document_id] += 1./N;
-            }
-            cout << endl;
-            ++document_count_;
-        }
-    }
-
-    vector<Document> FindTopDocuments(const string& raw_query) const {
-        const Query query = ParseQuery(raw_query);
-        auto matched_documents = FindAllDocuments(query);
-
-        sort(matched_documents.begin(), matched_documents.end(),
-             [](const Document& lhs, const Document& rhs) {
-                 return lhs.relevance > rhs.relevance;
-             });
-        if (matched_documents.size() > MAX_RESULT_DOCUMENT_COUNT) {
-            matched_documents.resize(MAX_RESULT_DOCUMENT_COUNT);
-        }
-        return matched_documents;
-    }
-
-private:
-    
-    int document_count_ = 0;
-    map<string, map<int, double>> word_to_document_freqs_;  
-    set<string> stop_words_;
-
-    bool IsStopWord(const string& word) const {
-        if (!stop_words_.empty()) {
-            return stop_words_.count(word) > 0;
-        }
-        return false;
-    }
-
-    vector<string> SplitIntoWordsNoStop(const string& text) const {
-        vector<string> words;
-        for (const string& word : SplitIntoWords(text)) {
-            
-            if (!IsStopWord(word)) {
-                words.push_back(word);
-            }
-        }
-        return words;
-    }
-
-    Query ParseQuery(const string& text) const {
-        Query query;
-        for (const string& word : SplitIntoWordsNoStop(text)) {
-            if (word[0] == '-') {
-                string minus_word = word.substr(1);
-                if (!IsStopWord(minus_word)) {
-                    query.minus_words.insert(minus_word);
-                }    
-            }    
-            else {
-                query.words.insert(word); 
-            }
-        }
-        return query;
-    }
-
-    vector<Document> FindAllDocuments(const Query& query) const {
-        vector<Document> matched_documents; //это не надо? как обойтись без него?
-        map<int, double> match_document;
-
-        if (query.words.size() > 0) {
-            
-            for (const string& s : query.words) {
-                if((s.size() > 0) && (word_to_document_freqs_.count(s) > 0)) { 
-                    double idf = log(static_cast<double>(document_count_) / static_cast<double>(word_to_document_freqs_.at(s).size()));
-
-                    for(const auto& i : word_to_document_freqs_.at(s)) { 
-                        match_document[i.first] += idf * i.second;
-                    }
-                }    
-            }   
-
-            if (query.minus_words.size() > 0) {
-                for (const string& s : query.minus_words) {
-                    if ((s.size() > 0) && (word_to_document_freqs_.count(s) > 0)) {
-                        for(const auto& i : word_to_document_freqs_.at(s)) {
-                            match_document[i.first] = 0;
-                        }
-                    }
-                }
-            }
-
-            for (pair<int, double> p : match_document) {
-                if (p.second > 0) { 
-                    matched_documents.push_back({p.first, p.second});
-                }
-            }
-            
-        }
-            
-        return matched_documents;
-    }
-
-};
-
-SearchServer CreateSearchServer() {
-    SearchServer search_server;
-    search_server.SetStopWords(ReadLine());
-
-    const int document_count = ReadLineWithNumber();
-    for (int document_id = 0; document_id < document_count; ++document_id) {
-        search_server.AddDocument(document_id, ReadLine());
-    }
-
-    return search_server;
+    return is;
 }
 
-int main() {
-    const SearchServer search_server = CreateSearchServer();
+struct BusesForStopResponse {
+    // Наполните полями эту структуру
+    vector<string> buses;
+};
 
-    const string query = ReadLine();
-    for (const auto& [document_id, relevance] : search_server.FindTopDocuments(query)) {
-        cout << "{ document_id = "s << document_id << ", "
-             << "relevance = "s << relevance << " }"s << endl;
+ostream& operator<<(ostream& os, const BusesForStopResponse& r) {
+    // Реализуйте эту функцию
+            if (r.buses.size() == 0) {
+                os << "No stop"s; // << endl;
+            } else {
+                bool is_first = true;
+                for (const string& bus : r.buses) {
+                    if (!is_first) {
+                        os << " "s;
+                    }
+                    is_first = false;
+                    os << bus;
+                }
+                //os << endl;
+            }
+    
+    
+    return os;
+}
+
+struct StopsForBusResponse {
+    // Наполните полями эту структуру
+    vector<pair<string, vector<string>>> stops;
+};
+
+ostream& operator<<(ostream& os, const StopsForBusResponse& r) {
+    // Реализуйте эту функцию
+            if (r.stops.size() == 0) {
+                os << "No bus"s;// << endl;
+            } else {
+                
+                bool first = true;
+                
+                for (const auto& stop : r.stops) {
+                    if (first) {                       
+                        first = false;
+                    } else {
+                        os << endl;                        
+                    }
+                    
+                    os << "Stop "s << stop.first << ":"s;
+
+                    if (stop.second.size() == 0) {
+                        os << " no interchange"s;
+                    } else {
+                        for (const auto& other_bus : stop.second) {
+                            //if (bus != other_bus) {
+                                os << " "s << other_bus;
+                            //}
+                        }
+                    }
+//                    os << endl;
+                }
+            }
+    return os;
+}
+
+struct AllBusesResponse {
+    // Наполните полями эту структуру
+    map<string, vector<string>> buses_to_stops;
+};
+
+ostream& operator<<(ostream& os, const AllBusesResponse& r) {
+    // Реализуйте эту функцию
+     if (r.buses_to_stops.empty()) {
+         os << "No buses"s;// << endl;
+     } else {
+         bool first = true;
+         
+         for (const auto& bus_item : r.buses_to_stops) {
+         if (first) {
+             first = false;
+         } else {
+             os << endl;
+         }
+             
+             
+             os << "Bus "s << bus_item.first << ":"s;
+             for (const string& stop : bus_item.second) {
+                 os << " "s << stop;
+             }
+             //os << endl;
+        }
     }
+    return os;
+}
+
+class BusManager {
+public:
+    void AddBus(const string& bus, const vector<string>& stops) {
+        // Реализуйте этот метод
+        buses_to_stops[bus] = stops; //это надо?
+        for (const string& stop : stops) {
+            stops_to_buses[stop].push_back(bus);
+        }        
+    }
+
+    BusesForStopResponse GetBusesForStop(const string& stop) const {
+       // cout << "GetBusesForStops"s << endl;
+        
+        // Реализуйте этот метод
+        BusesForStopResponse result;
+        //гарантия ненулевых данных?
+        if (stops_to_buses.size() > 0) {
+            for (const string& bus : stops_to_buses.at(stop)) { //не создавать stop
+                result.buses.push_back(bus);
+            }
+        }        
+                  
+        return result;
+    }
+
+    StopsForBusResponse GetStopsForBus(const string& bus) const {
+        
+  //      cout << "GetStopsForBus"s << endl;
+        
+        // Реализуйте этот метод
+        StopsForBusResponse result;
+        
+    
+            if (buses_to_stops.count(bus) != 0) {
+                for (const string& stop : buses_to_stops.at(bus)) {
+                    pair<string, vector<string>> stop_to_buses;
+                    
+                    stop_to_buses.first = stop;
+                  
+                    if (stops_to_buses.at(stop).size() > 1) {
+                        for (const string& other_bus : stops_to_buses.at(stop)) {
+                            if (bus != other_bus) {
+                                stop_to_buses.second.push_back(other_bus);
+                            }
+                        }
+                    }
+
+                    result.stops.push_back(stop_to_buses);
+                }
+            }
+    
+        return result;
+    }
+
+    AllBusesResponse GetAllBuses() const {
+    //    cout << "GetAllBuses"s << endl;
+        // Реализуйте этот метод
+        AllBusesResponse result;
+        result.buses_to_stops = buses_to_stops;
+        return result;    
+    }
+    
+private:    
+    map<string, vector<string>> buses_to_stops, stops_to_buses;
+};
+
+// Реализуйте функции и классы, объявленные выше, чтобы эта функция main
+// решала задачу "Автобусные остановки"
+
+int main() {
+    int query_count;
+    Query q;
+
+    cin >> query_count;
+
+    BusManager bm;
+    for (int i = 0; i < query_count; ++i) {
+        cin >> q;
+        switch (q.type) {
+            case QueryType::NewBus:
+                bm.AddBus(q.bus, q.stops);
+                break;
+            case QueryType::BusesForStop:
+                cout << bm.GetBusesForStop(q.stop) << endl;
+                break;
+            case QueryType::StopsForBus:
+                cout << bm.GetStopsForBus(q.bus) << endl;
+                break;
+            case QueryType::AllBuses:
+                cout << bm.GetAllBuses() << endl;
+                break;
+        }
+    }
+
 }
